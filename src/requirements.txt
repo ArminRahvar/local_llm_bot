@@ -1,0 +1,6 @@
+pyTelegramBotAPI==4.14.1
+PyMuPDF==1.22.3
+faiss-cpu==1.7.4
+sentence-transformers==2.2.2
+requests==2.31.0
+numpy==1.24.4
