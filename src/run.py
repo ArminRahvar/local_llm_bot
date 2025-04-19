@@ -6,7 +6,7 @@ from src.ollama_chat import ask_ollama
 from src.utils import extract_text_from_pdf,chunk_text,embed_chunks,build_faiss_index
 
 # --- CONFIG ---
-TELEGRAM_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+TELEGRAM_TOKEN = os.environ['BOT_TOKEN']
 
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
@@ -18,7 +18,7 @@ user_data = {}  # Stores chunks & faiss index per user
 # --- TELEGRAM HANDLERS ---
 @bot.message_handler(commands=["start"])
 def send_welcome(message):
-    bot.reply_to(message, "Hey! Send me a PDF and I’ll answer questions about it.")
+    bot.reply_to(message, "Hi! I'm your Ollama-powered chatbot. Just type a message and I'll reply")
 
 @bot.message_handler(content_types=["document"])
 def handle_pdf(message):
@@ -42,7 +42,7 @@ def handle_pdf(message):
     embeddings = embed_chunks(chunks)
     index = build_faiss_index(np.array(embeddings))
 
-    user_data[message.chat.id] = {
+    user_data[message.message_id] = {
         "chunks": chunks,
         "index": index
     }
@@ -51,21 +51,24 @@ def handle_pdf(message):
 
 @bot.message_handler(func=lambda message: True)
 def handle_question(message):
-    data = user_data.get(message.chat.id)
-    if not data:
-        bot.reply_to(message, "Please send a PDF first.")
-        return
+    if message.reply_to_message and message.reply_to_message.message_id in user_data:
+        # This is a reply to a PDF message
+        pdf_info = user_data[message.reply_to_message.message_id]
+        question = message.text
+        q_embedding = model.encode([question])
+        D, I = pdf_info["index"].search(np.array(q_embedding), k=3)
+        relevant_chunks = [pdf_info["chunks"][i] for i in I[0]]
+        context = "\n\n".join(relevant_chunks)
 
-    question = message.text
-    q_embedding = model.encode([question])
-    D, I = data["index"].search(np.array(q_embedding), k=3)
-    relevant_chunks = [data["chunks"][i] for i in I[0]]
-    context = "\n\n".join(relevant_chunks)
-
-    answer = ask_ollama(question, context)
-    bot.send_message(message.chat.id, answer)
+        answer = ask_ollama(question, context)
+        bot.send_message(message.chat.id, answer)
+    else:
+        # No PDF context: fallback to regular chat
+        question = message.text
+        answer = ask_ollama(question)
+        bot.send_message(message.chat.id, answer)
 
 # --- RUN ---
 if __name__ == "__main__":
     print("Bot is running...")
-    bot.infinity_polling()
+    bot.infinity_polling(timeout=300, long_polling_timeout=120)
